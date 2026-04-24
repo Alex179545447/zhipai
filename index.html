@@ -291,9 +291,70 @@
 
     <script>
         // ==================== 全局变量 ====================
-        // MiniERU OCR API配置 (API ID: 14600888, 名称: zhipai)
-        const MINIERU_API_ID = '14600888';
-        const MINIERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiIxNDYwMDg4OCIsInJvbGUiOiJST0xFX1JFR0lTVEVSIiwiaXNzIjoiT3BlblhMYWIiLCJpYXQiOjE3NzcwMTQzNDgsImNsaWVudElkIjoibGt6ZHg1N252eTIyamtwcTl4MnciLCJwaG9uZSI6IiIsIm9wZW5JZCI6bnVsbCwidXVpZCI6ImQzNmQyNTdlZS05MGZmLTRlY2MtOTE5NC1mMGQ2MjM5MjJkYjIiLCJlbWFpbCI6IiIsImV4cCI6MTc4NDc5MDM0OH0.j2o5UVuT-Tda5WXjHOQbmky1aqYPvvcd6OVFjGFIsBQNNaMEZTND8bmW6CqB58r8wYXFStvX40J8I5SQvKhnUg';
+        // 百度OCR配置
+        const BAIDU_API_KEY = 'pOvi6fCPEWGP9Im6MFiSWwbx';
+        const BAIDU_SECRET_KEY = 'r2ky74DtONzTuW1ViPeR7cMMvFpQSiuD';
+        let baiduAccessToken = '';
+        let baiduTokenExpiry = 0;
+        
+        // 获取百度Access Token
+        async function getBaiduAccessToken() {
+            if (baiduAccessToken && Date.now() < baiduTokenExpiry) {
+                return baiduAccessToken;
+            }
+            
+            try {
+                const response = await fetch('https://aip.baidubce.com/oauth/2.0/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `grant_type=client_credentials&client_id=${BAIDU_API_KEY}&client_secret=${BAIDU_SECRET_KEY}`
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    baiduAccessToken = data.access_token;
+                    baiduTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+                    return baiduAccessToken;
+                }
+            } catch (e) {
+                console.error('获取百度Token失败:', e);
+            }
+            return null;
+        }
+        
+        // 百度通用文字识别（高精度版）
+        async function baiduOCR(imageBase64) {
+            try {
+                const token = await getBaiduAccessToken();
+                if (!token) {
+                    throw new Error('无法获取百度Access Token');
+                }
+                
+                logOCR('调用百度OCR...');
+                
+                const response = await fetch(`https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=${token}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `image=${encodeURIComponent(imageBase64)}`
+                });
+                
+                if (!response.ok) throw new Error(`百度OCR失败: ${response.status}`);
+                
+                const result = await response.json();
+                logOCR('百度OCR响应: ' + JSON.stringify(result).substring(0, 200));
+                
+                if (result.words_result) {
+                    const text = result.words_result.map(r => r.words).join('\n');
+                    logOCR('识别文本: ' + text.substring(0, 500));
+                    return text;
+                }
+                
+                return '';
+            } catch (e) {
+                logOCR('百度OCR错误: ' + e.message);
+                throw e;
+            }
+        }
         
         let orders = JSON.parse(localStorage.getItem('orders') || '[]');
         let previewData = [];
@@ -524,7 +585,7 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // ==================== 图片处理（MiniERU OCR） ====================
+        // ==================== 图片处理（百度OCR） ====================
         function handleImageFile(file) {
             const reader = new FileReader();
             reader.onload = e => {
@@ -533,7 +594,7 @@
                 document.getElementById('ocrProgress').classList.remove('hidden');
                 document.getElementById('ocrDebug').classList.remove('hidden');
                 document.getElementById('ocrStatus').textContent = '正在识别...';
-                miniERUOCR(e.target.result);
+                baiduOCRHandler(e.target.result);
             };
             reader.readAsDataURL(file);
         }
@@ -546,135 +607,43 @@
             }
         }
 
-        async function miniERUOCR(imageBase64) {
+        // 百度OCR主处理函数
+        async function baiduOCRHandler(imageBase64) {
             try {
                 const base64Data = imageBase64.split(',')[1];
                 
-                // MiniERU 云端识别 - 使用正确的API端点
-                const callMiniERU = async () => {
-                    const binaryString = atob(base64Data);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-                    const blob = new Blob([bytes], { type: 'image/jpeg' });
-                    
-                    const formData = new FormData();
-                    formData.append('file', blob, 'image.jpg');
-                    formData.append('scene', 'ocr'); // 明确指定OCR场景
-                    
-                    logOCR('调用MiniERU云端OCR...');
-                    
-                    // 尝试多个可能的端点
-                    const endpoints = [
-                        'https://open.lab.hk/v1/ocr',
-                        'https://mineru.net/api/v1/ocr',
-                        'https://api.mineru.net/v1/ocr'
-                    ];
-                    
-                    let lastError;
-                    for (const endpoint of endpoints) {
-                        try {
-                            logOCR('尝试端点: ' + endpoint);
-                            const response = await fetch(endpoint, {
-                                method: 'POST',
-                                headers: { 
-                                    'Authorization': `Bearer ${MINIERU_API_KEY}`,
-                                    'X-API-Key': MINIERU_API_KEY
-                                },
-                                body: formData,
-                                mode: 'cors'
-                            });
-                            
-                            if (response.ok) {
-                                const result = await response.json();
-                                logOCR('端点成功: ' + endpoint);
-                                return result;
-                            }
-                        } catch (e) {
-                            lastError = e;
-                            logOCR('端点失败: ' + e.message);
-                        }
-                    }
-                    throw lastError || new Error('所有端点均失败');
-                };
+                // 尝试百度OCR
+                const text = await baiduOCR(base64Data);
                 
-                // 通过服务端代理调用（解决CORS问题）
-                const callViaProxy = async () => {
-                    const base64Data = imageBase64.split(',')[1];
+                if (text) {
+                    logOCR('百度OCR成功');
                     
-                    logOCR('通过代理调用MiniERU...');
-                    
-                    // 使用多个CORS代理
-                    const proxies = [
-                        'https://corsproxy.io/?',
-                        'https://api.allorigins.win/raw?url='
-                    ];
-                    
-                    const targetUrl = 'https://open.lab.hk/v1/ocr';
-                    
-                    for (const proxy of proxies) {
-                        try {
-                            logOCR('尝试代理: ' + proxy);
-                            
-                            const response = await fetch(proxy + encodeURIComponent(targetUrl), {
-                                method: 'POST',
-                                headers: {
-                                    'Authorization': `Bearer ${MINIERU_API_KEY}`,
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({ image: base64Data })
-                            });
-                            
-                            if (response.ok) {
-                                const result = await response.json();
-                                logOCR('代理成功: ' + proxy);
-                                return result;
-                            }
-                        } catch (e) {
-                            logOCR('代理失败: ' + e.message);
-                        }
-                    }
-                    
-                    throw new Error('代理调用全部失败');
-                };
-                
-                let result;
-                try {
-                    result = await callMiniERU();
-                } catch (e) {
-                    logOCR('直接调用失败: ' + e.message);
-                    try {
-                        result = await callViaProxy();
-                    } catch (e2) {
-                        logOCR('代理调用失败: ' + e2.message);
-                        throw e2;
-                    }
-                }
-                
-                let text = result.data?.text || result.text || result.content?.text || JSON.stringify(result);
-                logOCR('识别文本: ' + text.substring(0, 500));
-                
-                // 尝试多行表格解析
-                const parsedOrders = parseOCRTable(text);
-                if (parsedOrders.length > 0) {
-                    parsedOrders.forEach(order => calculateTimeNote(order));
-                    previewData = parsedOrders;
-                    showPreview();
-                    logOCR('✓ 成功解析 ' + parsedOrders.length + ' 条记录');
-                } else {
-                    const parsed = parseOCRText(text);
-                    if (parsed['班次时间']) {
-                        calculateTimeNote(parsed);
-                        previewData = [parsed];
+                    // 尝试多行表格解析
+                    const parsedOrders = parseOCRTable(text);
+                    if (parsedOrders.length > 0) {
+                        parsedOrders.forEach(order => calculateTimeNote(order));
+                        previewData = parsedOrders;
                         showPreview();
-                        logOCR('✓ 解析成功');
+                        logOCR('✓ 成功解析 ' + parsedOrders.length + ' 条记录');
                     } else {
-                        logOCR('未能识别有效数据');
-                        alert('未能识别到订单数据，请尝试手动输入或使用Excel导入');
+                        // 单条记录解析
+                        const parsed = parseOCRText(text);
+                        if (parsed['班次时间']) {
+                            calculateTimeNote(parsed);
+                            previewData = [parsed];
+                            showPreview();
+                            logOCR('✓ 解析成功');
+                        } else {
+                            logOCR('未能识别有效数据');
+                            alert('未能识别到订单数据，请尝试手动输入或使用Excel导入');
+                        }
                     }
+                } else {
+                    throw new Error('百度OCR未返回结果');
                 }
             } catch (err) {
-                logOCR('云端OCR失败: ' + err.message);
-                logOCR('提示: Excel截图推荐使用Excel导入功能');
+                logOCR('OCR失败: ' + err.message);
+                logOCR('尝试使用本地OCR...');
                 await useLocalOCR(imageBase64);
             } finally {
                 document.getElementById('ocrProgress').classList.add('hidden');
