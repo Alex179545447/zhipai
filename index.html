@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>派单转化器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#2563eb' }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+        .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .import-btn:active { transform: scale(0.97); }
+        .row-yellow { background-color: #FEF9C3; }
+        .row-white { background-color: #FFFFFF; }
+        .text-red-custom { color: #DC2626; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .animate-slideUp { animation: slideUp 0.3s ease-out; }
+        .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
+        .spinner { border: 3px solid #E5E7EB; border-top-color: #2563eb; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 顶部导航 -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 class="text-lg font-semibold text-gray-800">
+                <i class="fa-solid fa-clipboard-list text-primary mr-2"></i>派单转化器
+            </h1>
+            <button onclick="showHistory()" class="text-gray-600 hover:text-primary transition">
+                <i class="fa-solid fa-clock-rotate-left text-xl"></i>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- 导入方式选择 -->
+        <section id="importSection" class="mb-6">
+            <h2 class="text-base font-medium text-gray-700 mb-4">选择导入方式</h2>
+            <div class="grid grid-cols-3 gap-3">
+                <button onclick="showTextInput()" class="import-btn bg-white rounded-xl p-4 shadow-sm border-2 border-transparent hover:border-primary transition-all text-center">
+                    <div class="w-12 h-12 mx-auto mb-2 bg-blue-50 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-keyboard text-2xl text-primary"></i>
+                    </div>
+                    <p class="text-sm font-medium text-gray-700">文本输入</p>
+                </button>
+                <button onclick="showImageUpload()" class="import-btn bg-white rounded-xl p-4 shadow-sm border-2 border-transparent hover:border-primary transition-all text-center">
+                    <div class="w-12 h-12 mx-auto mb-2 bg-green-50 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-image text-2xl text-green-600"></i>
+                    </div>
+                    <p class="text-sm font-medium text-gray-700">图片识别</p>
+                </button>
+                <button onclick="showExcelUpload()" class="import-btn bg-white rounded-xl p-4 shadow-sm border-2 border-transparent hover:border-primary transition-all text-center">
+                    <div class="w-12 h-12 mx-auto mb-2 bg-purple-50 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-file-excel text-2xl text-purple-600"></i>
+                    </div>
+                    <p class="text-sm font-medium text-gray-700">Excel导入</p>
+                </button>
+            </div>
+        </section>
+
+        <!-- 文本输入区域 -->
+        <section id="textInputSection" class="hidden bg-white rounded-xl shadow-sm p-4 mb-6 animate-fadeIn">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-medium text-gray-700">文本输入</h3>
+                <button onclick="hideTextInput()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <textarea id="textInput" rows="10" placeholder="请粘贴订单信息，格式示例：
+时间：4月16日
+场站：北京南站
+接送站：送站
+班次：G3
+班次时间：6:52
+客人：万明珠 13816511198
+人数：2
+宾馆：看丹红快捷酒店" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary resize-none font-mono"></textarea>
+            <div class="mt-3 flex gap-2">
+                <button onclick="parseTextInput()" class="flex-1 bg-primary text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-600 transition">
+                    解析并导入
+                </button>
+                <button onclick="clearTextInput()" class="px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition">
+                    清空
+                </button>
+            </div>
+        </section>
+
+        <!-- 图片上传区域 -->
+        <section id="imageUploadSection" class="hidden bg-white rounded-xl shadow-sm p-4 mb-6 animate-fadeIn">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-medium text-gray-700">图片识别</h3>
+                <button onclick="hideImageUpload()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div id="imageDropZone" class="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-primary transition">
+                <i class="fa-solid fa-cloud-arrow-up text-4xl text-gray-300 mb-2"></i>
+                <p class="text-sm text-gray-500">点击或拖拽图片到此处上传</p>
+                <p class="text-xs text-gray-400 mt-1">支持 JPG、PNG 格式</p>
+                <input type="file" id="imageInput" accept="image/*" class="hidden">
+            </div>
+            <div id="imagePreview" class="hidden mt-4">
+                <img id="previewImg" class="max-h-48 mx-auto rounded-lg mb-3">
+                <div id="ocrProgress" class="hidden text-center py-4">
+                    <div class="inline-flex items-center gap-3 px-4 py-3 bg-blue-50 rounded-xl text-sm text-primary">
+                        <div class="spinner"></div>
+                        <span id="ocrStatus">正在识别图片...</span>
+                    </div>
+                </div>
+                <div id="ocrDebug" class="hidden mt-3 p-3 bg-gray-100 rounded-lg text-xs text-gray-600 max-h-40 overflow-auto">
+                    <p class="font-medium mb-1">识别日志：</p>
+                    <pre id="ocrLog"></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- Excel上传区域 -->
+        <section id="excelUploadSection" class="hidden bg-white rounded-xl shadow-sm p-4 mb-6 animate-fadeIn">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-medium text-gray-700">Excel导入</h3>
+                <button onclick="hideExcelUpload()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div id="excelDropZone" class="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-primary transition">
+                <i class="fa-solid fa-file-import text-4xl text-gray-300 mb-2"></i>
+                <p class="text-sm text-gray-500">点击上传 Excel 文件</p>
+                <p class="text-xs text-gray-400 mt-1">支持 .xlsx 格式</p>
+                <input type="file" id="excelInput" accept=".xlsx" class="hidden">
+            </div>
+        </section>
+
+        <!-- 数据预览区域 -->
+        <section id="previewSection" class="hidden bg-white rounded-xl shadow-sm p-4 mb-6 animate-fadeIn">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-medium text-gray-700">数据预览</h3>
+                <span id="previewCount" class="text-xs text-gray-400"></span>
+            </div>
+            <div class="table-container mb-4">
+                <table class="w-full text-sm min-w-[1200px]">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">时间</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">团号</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">场站</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">接送站</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">调度</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">司机</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">班次</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">班次时间</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">时间备注</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">客人</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">人数</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">宾馆</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">备注</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">金额</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">车队金额</th>
+                            <th class="px-2 py-2 text-left text-xs font-medium text-gray-500">旅行社金额</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewTableBody"></tbody>
+                </table>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="confirmImport()" class="flex-1 bg-primary text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-600 transition">
+                    确认导入
+                </button>
+                <button onclick="cancelPreview()" class="px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition">
+                    取消
+                </button>
+            </div>
+        </section>
+
+        <!-- 排单表区域 -->
+        <section id="orderTableSection" class="hidden animate-fadeIn">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-base font-medium text-gray-700">排单表</h2>
+                <div class="flex gap-2">
+                    <button onclick="addNewOrder()" class="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 transition flex items-center gap-1">
+                        <i class="fa-solid fa-plus"></i><span>新增</span>
+                    </button>
+                    <button onclick="exportToExcel()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition flex items-center gap-1">
+                        <i class="fa-solid fa-download"></i><span>导出</span>
+                    </button>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div class="table-container">
+                    <table class="w-full text-sm min-w-[1400px]">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">时间</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">团号</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">场站</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">接送站</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">调度</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">司机</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">班次</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">班次时间</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">时间备注</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">客人</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">人数</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">宾馆</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">备注</th>
+                                <th class="px-2 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">金额</th>
+                                <th class="px-2 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orderTableBody"></tbody>
+                    </table>
+                </div>
+                <div id="emptyState" class="hidden py-12 text-center">
+                    <i class="fa-solid fa-inbox text-5xl text-gray-300 mb-3"></i>
+                    <p class="text-gray-400 text-sm">暂无订单数据</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 订单弹窗 -->
+    <div id="orderModal" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slideUp">
+            <div class="sticky top-0 bg-white px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 id="modalTitle" class="text-base font-medium text-gray-800">新增订单</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-sm text-gray-600 mb-1">时间</label><input type="text" id="edit_时间" placeholder="如：4月16日" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">团号</label><input type="text" id="edit_团号" placeholder="团号" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                </div>
+                <div><label class="block text-sm text-gray-600 mb-1">场站</label><input type="text" id="edit_场站" placeholder="火车站或机场" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-sm text-gray-600 mb-1">接送站</label><select id="edit_接送站" onchange="onJieSongChange()" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary bg-white"><option value="">请选择</option><option value="接站">接站</option><option value="送站">送站</option></select></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">人数</label><input type="number" id="edit_人数" placeholder="人数" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-sm text-gray-600 mb-1">调度</label><input type="text" id="edit_调度" placeholder="调度员姓名" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">司机</label><input type="text" id="edit_司机" placeholder="司机姓名" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-sm text-gray-600 mb-1">班次</label><input type="text" id="edit_班次" placeholder="如：G3、C799" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">班次时间</label><input type="text" id="edit_班次时间" placeholder="如：6:52" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary" oninput="autoFillTimeNote()"></div>
+                </div>
+                <div><label class="block text-sm text-gray-600 mb-1">时间备注</label><input type="text" id="edit_时间备注" placeholder="自动计算或手动输入" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">客人</label><input type="text" id="edit_客人" placeholder="姓名 电话" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">宾馆</label><input type="text" id="edit_宾馆" placeholder="酒店名称" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">备注</label><input type="text" id="edit_备注" placeholder="备注信息" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div><label class="block text-sm text-gray-600 mb-1">金额</label><input type="number" id="edit_金额" placeholder="0.00" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">车队金额</label><input type="number" id="edit_车队金额" placeholder="0.00" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                    <div><label class="block text-sm text-gray-600 mb-1">旅行社金额</label><input type="number" id="edit_旅行社金额" placeholder="0.00" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary"></div>
+                </div>
+            </div>
+            <div class="sticky bottom-0 bg-white px-5 py-4 border-t border-gray-100 flex gap-3">
+                <button onclick="closeModal()" class="flex-1 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition">取消</button>
+                <button onclick="saveOrder()" class="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 历史记录弹窗 -->
+    <div id="historyModal" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md animate-slideUp">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="text-base font-medium text-gray-800">数据管理</h3>
+                <button onclick="closeHistoryModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-5 space-y-3">
+                <button onclick="clearAllData()" class="w-full py-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-trash-can"></i>清空所有数据
+                </button>
+                <div class="text-xs text-gray-400 text-center py-2">当前记录数：<span id="recordCount">0</span> 条</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 全局变量 ====================
+        // MiniERU OCR API配置 (API ID: 14600888, 名称: zhipai)
+        const MINIERU_API_ID = '14600888';
+        const MINIERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiIxNDYwMDg4OCIsInJvbGUiOiJST0xFX1JFR0lTVEVSIiwiaXNzIjoiT3BlblhMYWIiLCJpYXQiOjE3NzcwMTQzNDgsImNsaWVudElkIjoibGt6ZHg1N252eTIyamtwcTl4MnciLCJwaG9uZSI6IiIsIm9wZW5JZCI6bnVsbCwidXVpZCI6ImQzNmQyNTdlZS05MGZmLTRlY2MtOTE5NC1mMGQ2MjM5MjJkYjIiLCJlbWFpbCI6IiIsImV4cCI6MTc4NDc5MDM0OH0.j2o5UVuT-Tda5WXjHOQbmky1aqYPvvcd6OVFjGFIsBQNNaMEZTND8bmW6CqB58r8wYXFStvX40J8I5SQvKhnUg';
+        
+        let orders = JSON.parse(localStorage.getItem('orders') || '[]');
+        let previewData = [];
+        let editingOrderId = null;
+        const FIELDS = ['时间', '团号', '场站', '接送站', '调度', '司机', '班次', '班次时间', '时间备注', '客人', '人数', '宾馆', '备注', '金额', '车队金额', '旅行社金额'];
+
+        // ==================== 场站识别规则 ====================
+        const TRAIN_STATIONS = ['北京站', '北京西站', '北京南站', '北京北站', '清河站', '北京朝阳站', '北京丰台站', '北京通州站'];
+
+        function isAirport(stationName) {
+            if (!stationName) return false;
+            if (stationName.includes('机场')) return true;
+            if (stationName.includes('大兴') || stationName.includes('首都')) return true;
+            if (/T[123]/.test(stationName)) return true;
+            return false;
+        }
+
+        function isTrainStation(stationName) {
+            if (!stationName) return false;
+            for (const station of TRAIN_STATIONS) {
+                if (stationName.includes(station)) return true;
+            }
+            if (stationName.includes('站') && !stationName.includes('机场') && !stationName.includes('酒店')) return true;
+            return false;
+        }
+
+        // ==================== 初始化 ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            renderOrderTable();
+            updateRecordCount();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            // 图片上传
+            const imageInput = document.getElementById('imageInput');
+            const imageDropZone = document.getElementById('imageDropZone');
+            
+            if (imageDropZone) {
+                imageDropZone.addEventListener('click', () => imageInput?.click());
+                imageDropZone.addEventListener('dragover', e => { e.preventDefault(); imageDropZone.classList.add('border-primary'); });
+                imageDropZone.addEventListener('dragleave', () => imageDropZone.classList.remove('border-primary'));
+                imageDropZone.addEventListener('drop', e => {
+                    e.preventDefault();
+                    imageDropZone.classList.remove('border-primary');
+                    if (e.dataTransfer.files[0]) handleImageFile(e.dataTransfer.files[0]);
+                });
+            }
+            if (imageInput) {
+                imageInput.addEventListener('change', e => { if (e.target.files[0]) handleImageFile(e.target.files[0]); });
+            }
+
+            // Excel上传
+            const excelInput = document.getElementById('excelInput');
+            const excelDropZone = document.getElementById('excelDropZone');
+            
+            if (excelDropZone) {
+                excelDropZone.addEventListener('click', () => excelInput?.click());
+                excelDropZone.addEventListener('dragover', e => { e.preventDefault(); excelDropZone.classList.add('border-primary'); });
+                excelDropZone.addEventListener('dragleave', () => excelDropZone.classList.remove('border-primary'));
+                excelDropZone.addEventListener('drop', e => {
+                    e.preventDefault();
+                    excelDropZone.classList.remove('border-primary');
+                    if (e.dataTransfer.files[0]?.name.endsWith('.xlsx')) handleExcelFile(e.dataTransfer.files[0]);
+                });
+            }
+            if (excelInput) {
+                excelInput.addEventListener('change', e => { if (e.target.files[0]) handleExcelFile(e.target.files[0]); });
+            }
+        }
+
+        // ==================== 显示/隐藏 ====================
+        function showTextInput() {
+            document.getElementById('textInputSection').classList.remove('hidden');
+            document.getElementById('imageUploadSection').classList.add('hidden');
+            document.getElementById('excelUploadSection').classList.add('hidden');
+            document.getElementById('previewSection').classList.add('hidden');
+        }
+        function hideTextInput() { document.getElementById('textInputSection').classList.add('hidden'); }
+        function showImageUpload() {
+            document.getElementById('imageUploadSection').classList.remove('hidden');
+            document.getElementById('textInputSection').classList.add('hidden');
+            document.getElementById('excelUploadSection').classList.add('hidden');
+            document.getElementById('previewSection').classList.add('hidden');
+        }
+        function hideImageUpload() { document.getElementById('imageUploadSection').classList.add('hidden'); }
+        function showExcelUpload() {
+            document.getElementById('excelUploadSection').classList.remove('hidden');
+            document.getElementById('textInputSection').classList.add('hidden');
+            document.getElementById('imageUploadSection').classList.add('hidden');
+            document.getElementById('previewSection').classList.add('hidden');
+        }
+        function hideExcelUpload() { document.getElementById('excelUploadSection').classList.add('hidden'); }
+        function clearTextInput() { document.getElementById('textInput').value = ''; }
+
+        // ==================== Excel处理 ====================
+        // Excel列名到系统字段的映射
+        const EXCEL_FIELD_MAP = {
+            '时间': '时间',
+            '日期': '时间',
+            '场站': '场站',
+            '站点': '场站',
+            '接送站': '接送站',
+            '调度': '调度',
+            '司机': '司机',
+            '班次': '班次',
+            '车次': '班次',
+            '班次时间': '班次时间',
+            '时间备注': '时间备注',
+            '客人': '客人',
+            '姓名': '客人',
+            '联系人': '客人',
+            '手机号': '手机号',
+            '电话': '手机号',
+            '人数': '人数',
+            '人': '人数',
+            '宾馆': '宾馆',
+            '酒店': '宾馆',
+            '团号': '团号'
+        };
+
+        function handleExcelFile(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    
+                    if (jsonData.length < 2) { 
+                        alert('Excel文件数据为空'); 
+                        return; 
+                    }
+
+                    const headers = jsonData[0].map(h => String(h).trim());
+                    console.log('Excel表头:', headers);
+                    
+                    const newOrders = [];
+
+                    for (let i = 1; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || row.length === 0 || !row.some(cell => cell)) continue;
+                        
+                        const order = {};
+                        let guestName = '';
+                        let guestPhone = '';
+                        
+                        // 遍历表头，建立字段映射
+                        headers.forEach((header, colIdx) => {
+                            const mappedField = EXCEL_FIELD_MAP[header];
+                            if (!mappedField) return;
+                            
+                            let value = row[colIdx];
+                            if (value === undefined || value === null) value = '';
+                            value = String(value).trim();
+                            
+                            // 日期转换
+                            if (mappedField === '时间' && value) {
+                                // Excel日期序列号（大于25569是日期）
+                                if (/^\d+$/.test(value) && parseFloat(value) > 25569) {
+                                    const d = new Date((parseFloat(value) - 25569) * 86400 * 1000);
+                                    value = `${d.getMonth() + 1}月${d.getDate()}日`;
+                                }
+                                order['时间'] = value;
+                            }
+                            // 班次时间转换
+                            else if (mappedField === '班次时间' && value) {
+                                // Excel时间是小数（如0.652778 = 15:40）
+                                const num = parseFloat(value);
+                                if (!isNaN(num) && num > 0 && num < 1) {
+                                    const totalMins = Math.round(num * 24 * 60);
+                                    value = `${Math.floor(totalMins / 60)}:${(totalMins % 60).toString().padStart(2, '0')}`;
+                                }
+                                order['班次时间'] = value;
+                            }
+                            // 手机号单独存储
+                            else if (mappedField === '手机号' && value) {
+                                guestPhone = value;
+                            }
+                            // 客人姓名
+                            else if (mappedField === '客人' && value) {
+                                guestName = value;
+                            }
+                            // 其他字段直接赋值
+                            else if (mappedField !== '手机号' && value) {
+                                order[mappedField] = value;
+                            }
+                        });
+                        
+                        // 合并客人和手机号
+                        if (guestName && guestPhone) {
+                            order['客人'] = guestName + ' ' + guestPhone;
+                        } else if (guestPhone) {
+                            order['客人'] = guestPhone;
+                        } else if (guestName) {
+                            order['客人'] = guestName;
+                        }
+                        
+                        // 从行文本中判断接送站
+                        const rowText = row.join(' ');
+                        if (rowText.includes('送站') || rowText.includes('返程')) {
+                            order['接送站'] = '送站';
+                        } else if (rowText.includes('接站')) {
+                            order['接送站'] = '接站';
+                        }
+                        
+                        // 计算时间备注（如果还没有）
+                        if (!order['时间备注'] || order['时间备注'] === '') {
+                            calculateTimeNote(order);
+                        }
+                        
+                        console.log('解析订单:', order);
+                        newOrders.push(order);
+                    }
+
+                    if (newOrders.length > 0) {
+                        previewData = newOrders;
+                        showPreview();
+                    } else {
+                        alert('未找到有效数据');
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert('Excel解析失败: ' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ==================== 图片处理（MiniERU OCR） ====================
+        function handleImageFile(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.getElementById('previewImg').src = e.target.result;
+                document.getElementById('imagePreview').classList.remove('hidden');
+                document.getElementById('ocrProgress').classList.remove('hidden');
+                document.getElementById('ocrDebug').classList.remove('hidden');
+                document.getElementById('ocrStatus').textContent = '正在识别...';
+                miniERUOCR(e.target.result);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function logOCR(msg) {
+            const logEl = document.getElementById('ocrLog');
+            if (logEl) {
+                logEl.textContent += `${new Date().toLocaleTimeString()}: ${msg}\n`;
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+        }
+
+        async function miniERUOCR(imageBase64) {
+            try {
+                const base64Data = imageBase64.split(',')[1];
+                
+                // MiniERU 云端识别 - 使用正确的API端点
+                const callMiniERU = async () => {
+                    const binaryString = atob(base64Data);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                    const blob = new Blob([bytes], { type: 'image/jpeg' });
+                    
+                    const formData = new FormData();
+                    formData.append('file', blob, 'image.jpg');
+                    formData.append('scene', 'ocr'); // 明确指定OCR场景
+                    
+                    logOCR('调用MiniERU云端OCR...');
+                    
+                    // 尝试多个可能的端点
+                    const endpoints = [
+                        'https://open.lab.hk/v1/ocr',
+                        'https://mineru.net/api/v1/ocr',
+                        'https://api.mineru.net/v1/ocr'
+                    ];
+                    
+                    let lastError;
+                    for (const endpoint of endpoints) {
+                        try {
+                            logOCR('尝试端点: ' + endpoint);
+                            const response = await fetch(endpoint, {
+                                method: 'POST',
+                                headers: { 
+                                    'Authorization': `Bearer ${MINIERU_API_KEY}`,
+                                    'X-API-Key': MINIERU_API_KEY
+                                },
+                                body: formData,
+                                mode: 'cors'
+                            });
+                            
+                            if (response.ok) {
+                                const result = await response.json();
+                                logOCR('端点成功: ' + endpoint);
+                                return result;
+                            }
+                        } catch (e) {
+                            lastError = e;
+                            logOCR('端点失败: ' + e.message);
+                        }
+                    }
+                    throw lastError || new Error('所有端点均失败');
+                };
+                
+                // 通过服务端代理调用（解决CORS问题）
+                const callViaProxy = async () => {
+                    const base64Data = imageBase64.split(',')[1];
+                    
+                    logOCR('通过代理调用MiniERU...');
+                    
+                    // 使用多个CORS代理
+                    const proxies = [
+                        'https://corsproxy.io/?',
+                        'https://api.allorigins.win/raw?url='
+                    ];
+                    
+                    const targetUrl = 'https://open.lab.hk/v1/ocr';
+                    
+                    for (const proxy of proxies) {
+                        try {
+                            logOCR('尝试代理: ' + proxy);
+                            
+                            const response = await fetch(proxy + encodeURIComponent(targetUrl), {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${MINIERU_API_KEY}`,
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({ image: base64Data })
+                            });
+                            
+                            if (response.ok) {
+                                const result = await response.json();
+                                logOCR('代理成功: ' + proxy);
+                                return result;
+                            }
+                        } catch (e) {
+                            logOCR('代理失败: ' + e.message);
+                        }
+                    }
+                    
+                    throw new Error('代理调用全部失败');
+                };
+                
+                let result;
+                try {
+                    result = await callMiniERU();
+                } catch (e) {
+                    logOCR('直接调用失败: ' + e.message);
+                    try {
+                        result = await callViaProxy();
+                    } catch (e2) {
+                        logOCR('代理调用失败: ' + e2.message);
+                        throw e2;
+                    }
+                }
+                
+                let text = result.data?.text || result.text || result.content?.text || JSON.stringify(result);
+                logOCR('识别文本: ' + text.substring(0, 500));
+                
+                // 尝试多行表格解析
+                const parsedOrders = parseOCRTable(text);
+                if (parsedOrders.length > 0) {
+                    parsedOrders.forEach(order => calculateTimeNote(order));
+                    previewData = parsedOrders;
+                    showPreview();
+                    logOCR('✓ 成功解析 ' + parsedOrders.length + ' 条记录');
+                } else {
+                    const parsed = parseOCRText(text);
+                    if (parsed['班次时间']) {
+                        calculateTimeNote(parsed);
+                        previewData = [parsed];
+                        showPreview();
+                        logOCR('✓ 解析成功');
+                    } else {
+                        logOCR('未能识别有效数据');
+                        alert('未能识别到订单数据，请尝试手动输入或使用Excel导入');
+                    }
+                }
+            } catch (err) {
+                logOCR('云端OCR失败: ' + err.message);
+                logOCR('提示: Excel截图推荐使用Excel导入功能');
+                await useLocalOCR(imageBase64);
+            } finally {
+                document.getElementById('ocrProgress').classList.add('hidden');
+            }
+        }
+
+        // ==================== OCR文本解析函数 ====================
+        function parseOCRText(text) {
+            const order = {};
+            const cleanText = text.replace(/\s+/g, ' ').replace(/[\r\n]+/g, '\n').trim();
+            
+            // 日期匹配
+            const dateMatch = cleanText.match(/(\d{1,2})月(\d{1,2})日/) || cleanText.match(/(\d{1,2})\.(\d{1,2})/);
+            if (dateMatch) order['时间'] = dateMatch[1] + '月' + dateMatch[2] + '日';
+            
+            // 班次时间
+            const timeMatch = cleanText.match(/(\d{1,2}):(\d{2})/);
+            if (timeMatch) order['班次时间'] = timeMatch[1] + ':' + timeMatch[2];
+            
+            // 班次
+            const trainMatch = cleanText.match(/\b(G\d+|D\d+|C\d+|Z\d+|CA\d+|MU\d+|HU\d+|Y\d+)\b/i);
+            if (trainMatch) order['班次'] = trainMatch[1].toUpperCase();
+            
+            // 场站
+            const stationMatch = cleanText.match(/(北京[东南西北]?站|北京站|北京西站|北京南站|北京北站|清河站|北京朝阳站|北京丰台站|北京通州站|首都机场[T1-3]?|大兴机场)/);
+            if (stationMatch) order['场站'] = stationMatch[1];
+            
+            // 接送站
+            if (/送站|返程/.test(cleanText)) order['接送站'] = '送站';
+            else if (/接站/.test(cleanText)) order['接送站'] = '接站';
+            
+            // 人数
+            const peopleMatch = cleanText.match(/(\d+)\s*[人座]/);
+            if (peopleMatch) order['人数'] = peopleMatch[1];
+            
+            // 客人
+            const phoneMatch = cleanText.match(/(1[3-9]\d{9})/);
+            if (phoneMatch) {
+                const idx = cleanText.indexOf(phoneMatch[1]);
+                const before = cleanText.substring(0, idx).trim();
+                const nameMatch = before.match(/([^\s\d]{2,5})$/);
+                order['客人'] = nameMatch ? nameMatch[1] + ' ' + phoneMatch[1] : phoneMatch[1];
+            }
+            
+            // 宾馆
+            const hotelMatch = cleanText.match(/(.{2,10}(?:酒店|宾馆|旅馆|民宿))/);
+            if (hotelMatch) order['宾馆'] = hotelMatch[1];
+            
+            return order;
+        }
+        
+        function parseOCRTable(text) {
+            const orders = [];
+            const lines = text.split(/\n|[\r\n]+/);
+            let currentOrder = {};
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                
+                // 日期
+                const dateMatch = trimmed.match(/(\d{1,2})月(\d{1,2})日/);
+                if (dateMatch) {
+                    if (Object.keys(currentOrder).length > 0) orders.push(currentOrder);
+                    currentOrder = { '时间': dateMatch[1] + '月' + dateMatch[2] + '日' };
+                }
+                
+                // 场站
+                const stationMatch = trimmed.match(/(北京[东南西北]?站|首都机场[T1-3]?|大兴机场)/);
+                if (stationMatch) currentOrder['场站'] = stationMatch[1];
+                
+                // 接送站
+                if (trimmed.includes('送站') || trimmed.includes('返程')) currentOrder['接送站'] = '送站';
+                else if (trimmed.includes('接站')) currentOrder['接送站'] = '接站';
+                
+                // 班次
+                const trainMatch = trimmed.match(/\b(G\d+|D\d+|C\d+|CA\d+|MU\d+)\b/i);
+                if (trainMatch) currentOrder['班次'] = trainMatch[1].toUpperCase();
+                
+                // 时间
+                const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
+                if (timeMatch) currentOrder['班次时间'] = timeMatch[1] + ':' + timeMatch[2];
+                
+                // 电话
+                const phoneMatch = trimmed.match(/(1[3-9]\d{9})/);
+                if (phoneMatch) {
+                    const before = trimmed.substring(0, trimmed.indexOf(phoneMatch[1])).trim();
+                    const nameMatch = before.match(/([^\s\d]{2,5})$/);
+                    currentOrder['客人'] = nameMatch ? nameMatch[1] + ' ' + phoneMatch[1] : phoneMatch[1];
+                }
+                
+                // 人数
+                const peopleMatch = trimmed.match(/(\d+)\s*[人座]/);
+                if (peopleMatch) currentOrder['人数'] = peopleMatch[1];
+            }
+            
+            if (Object.keys(currentOrder).length > 0) orders.push(currentOrder);
+            return orders;
+        }
+
+        async function useLocalOCR(imageData) {
+            try {
+                document.getElementById('ocrStatus').textContent = '本地OCR...';
+                const result = await Tesseract.recognize(imageData, 'chi_sim+eng');
+                logOCR('本地OCR识别结果: ' + result.data.text.substring(0, 300));
+                
+                // 尝试多行表格解析
+                const parsedOrders = parseOCRTable(result.data.text);
+                if (parsedOrders.length > 0) {
+                    parsedOrders.forEach(order => calculateTimeNote(order));
+                    previewData = parsedOrders;
+                    showPreview();
+                    logOCR('✓ 本地OCR成功解析 ' + parsedOrders.length + ' 条记录');
+                } else {
+                    const parsed = parseOCRText(result.data.text);
+                    if (parsed['班次时间']) {
+                        calculateTimeNote(parsed);
+                        previewData = [parsed];
+                        showPreview();
+                        logOCR('✓ 本地OCR解析成功');
+                    } else {
+                        alert('图片识别失败，请手动输入');
+                    }
+                }
+            } catch (err) {
+                logOCR('本地OCR失败: ' + err.message);
+                alert('图片识别失败');
+            }
+        }
+
+        // ==================== MiniERU 云端OCR ====================
+        async function miniERUOCR(imageBase64) {
+            try {
+                // 使用MiniERU Agent API (无需Token)
+                const base64Data = imageBase64.split(',')[1];
+                
+                // 步骤1: 上传图片获取URL
+                logOCR('上传图片到MiniERU...');
+                const uploadFormData = new FormData();
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                const blob = new Blob([bytes], { type: 'image/jpeg' });
+                uploadFormData.append('file', blob, 'image.jpg');
+                
+                // 上传到临时存储获取URL
+                let imageUrl = '';
+                
+                // 尝试上传到图片托管服务
+                try {
+                    const imgbbResponse = await fetch('https://api.imgbb.com/1/upload?key=d36eb6591370ae7f9089d85875571358', {
+                        method: 'POST',
+                        body: new FormData().append('image', base64Data)
+                    });
+                    if (imgbbResponse.ok) {
+                        const imgbbData = await imgbbResponse.json();
+                        imageUrl = imgbbData.data.url;
+                        logOCR('图片上传成功: ' + imageUrl);
+                    }
+                } catch (e) {
+                    logOCR('图片托管上传失败: ' + e.message);
+                }
+                
+                // 如果无法获取URL，提示用户
+                if (!imageUrl) {
+                    logOCR('无法上传图片，尝试直接Base64方式...');
+                    // 尝试使用base64直接传输
+                    imageUrl = 'data:image/jpeg;base64,' + base64Data;
+                }
+                
+                // 步骤2: 提交解析任务
+                logOCR('提交MiniERU解析任务...');
+                const taskData = {
+                    url: imageUrl,
+                    is_ocr: true,
+                    enable_table: true,
+                    enable_formula: false,
+                    language: 'ch'
+                };
+                
+                // 尝试多个MiniERU端点
+                const endpoints = [
+                    'https://mineru.net/api/v1/agent/parse/url',
+                    'https://api.mineru.net/api/v1/agent/parse/url',
+                    'https://mineru.net/api/v1/agent/parse/file'
+                ];
+                
+                let taskId = null;
+                let taskEndpoint = null;
+                
+                for (const endpoint of endpoints) {
+                    try {
+                        logOCR('尝试端点: ' + endpoint);
+                        const response = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(taskData)
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            logOCR('提交成功: ' + JSON.stringify(result).substring(0, 200));
+                            if (result.data?.task_id) {
+                                taskId = result.data.task_id;
+                                taskEndpoint = endpoint.replace('/parse/url', '/parse/');
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        logOCR('端点失败: ' + e.message);
+                    }
+                }
+                
+                // 如果无法获取task_id，使用本地OCR
+                if (!taskId) {
+                    logOCR('云端API不可用，使用本地OCR...');
+                    await useLocalOCR(imageBase64);
+                    return;
+                }
+                
+                // 步骤3: 轮询查询结果
+                logOCR('等待解析结果 (task_id: ' + taskId + ')...');
+                const maxAttempts = 30;
+                let attempts = 0;
+                let resultText = '';
+                
+                while (attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    try {
+                        const statusResponse = await fetch(taskEndpoint + taskId);
+                        if (statusResponse.ok) {
+                            const status = await statusResponse.json();
+                            logOCR('状态: ' + JSON.stringify(status).substring(0, 200));
+                            
+                            if (status.data?.state === 'done') {
+                                // 获取Markdown内容
+                                if (status.data.markdown_url) {
+                                    const mdResponse = await fetch(status.data.markdown_url);
+                                    if (mdResponse.ok) {
+                                        resultText = await mdResponse.text();
+                                    }
+                                }
+                                // 尝试其他可能的输出格式
+                                if (!resultText && status.data.content) {
+                                    resultText = typeof status.data.content === 'string' 
+                                        ? status.data.content 
+                                        : JSON.stringify(status.data.content);
+                                }
+                                break;
+                            } else if (status.data?.state === 'failed') {
+                                throw new Error(status.data.err_msg || '解析失败');
+                            }
+                        }
+                    } catch (e) {
+                        logOCR('轮询失败: ' + e.message);
+                    }
+                    
+                    attempts++;
+                    document.getElementById('ocrStatus').textContent = `解析中... (${attempts}/${maxAttempts})`;
+                }
+                
+                if (resultText) {
+                    logOCR('识别文本: ' + resultText.substring(0, 500));
+                    
+                    const parsedOrders = parseOCRTable(resultText);
+                    if (parsedOrders.length > 0) {
+                        parsedOrders.forEach(order => calculateTimeNote(order));
+                        previewData = parsedOrders;
+                        showPreview();
+                        logOCR('✓ 成功解析 ' + parsedOrders.length + ' 条记录');
+                    } else {
+                        const parsed = parseOCRText(resultText);
+                        if (parsed['班次时间']) {
+                            calculateTimeNote(parsed);
+                            previewData = [parsed];
+                            showPreview();
+                            logOCR('✓ 解析成功');
+                        } else {
+                            logOCR('未能识别有效数据');
+                            alert('未能识别到订单数据，请尝试Excel导入');
+                        }
+                    }
+                } else {
+                    logOCR('解析超时，使用本地OCR...');
+                    await useLocalOCR(imageBase64);
+                }
+            } catch (err) {
+                logOCR('MiniERU调用失败: ' + err.message);
+                logOCR('使用本地OCR作为备选...');
+                await useLocalOCR(imageBase64);
+            } finally {
+                document.getElementById('ocrProgress').classList.add('hidden');
+            }
+        }
+
+        // ==================== 文本解析 ====================
+        function parseTextInput() {
+            const text = document.getElementById('textInput').value;
+            if (!text.trim()) { alert('请输入订单信息'); return; }
+            const order = {};
+            const lines = text.split('\n');
+            let isReturnTrip = false;
+
+            for (const line of lines) {
+                const parts = line.split(/[：:]/);
+                if (parts.length < 2) continue;
+                const key = parts[0].trim().replace(/\s/g, '');
+                let value = parts.slice(1).join(':').trim();
+
+                if (key === '返程日期' || key === '返程') {
+                    isReturnTrip = true;
+                    const m = value.match(/(\d+)[.](\d+)/);
+                    order['时间'] = m ? m[1] + '月' + m[2] + '日' : value;
+                } else if (key === '返程时间') { order['班次时间'] = value; }
+                else if (key === '时间' || key === '日期') { order['时间'] = value; }
+                else if (key === '场站' || key === '站点' || key === '站') {
+                    if (!value.includes('站')) value = value + '站';
+                    order['场站'] = value;
+                }
+                else if (key === '班次' || key === '车次' || key === '航班') { order['班次'] = value; }
+                else if (key === '班次时间') { order['班次时间'] = value; }
+                else if (key === '客人' || key === '联系人' || key === '姓名') { order['客人'] = value.split('/')[0].trim(); }
+                else if (key === '人数' || key === '人' || key === '座') {
+                    // 优先匹配7座、5座等明确说明
+                    const zuoMatch = value.match(/(\d)座/);
+                    if (zuoMatch) {
+                        order['人数'] = zuoMatch[1];
+                    } else {
+                        // 提取纯数字
+                        const num = value.replace(/[^\d]/g, '');
+                        if (num) order['人数'] = num;
+                    }
+                }
+                else if (key === '宾馆' || key === '酒店') { order['宾馆'] = value; }
+            }
+
+            if (isReturnTrip || text.includes('送站')) order['接送站'] = '送站';
+            else if (text.includes('接站')) order['接送站'] = '接站';
+
+            if (order['班次时间']) {
+                calculateTimeNote(order);
+                previewData = [order];
+                showPreview();
+                hideTextInput();
+            } else {
+                alert('请确保包含班次时间信息');
+            }
+        }
+
+        // ==================== 计算时间备注 ====================
+        function calculateTimeNote(order) {
+            const jiesong = order['接送站'];
+            const changzhan = order['场站'] || '';
+            const bancitime = order['班次时间'] || '';
+
+            if (jiesong === '送站') {
+                if (isAirport(changzhan)) order['时间备注'] = subtractHours(bancitime, 3);
+                else if (isTrainStation(changzhan)) order['时间备注'] = subtractHours(bancitime, 2);
+                else order['时间备注'] = subtractHours(bancitime, 2);
+            } else if (jiesong === '接站') {
+                order['时间备注'] = bancitime;
+            } else {
+                order['时间备注'] = '';
+            }
+        }
+
+        function subtractHours(timeStr, hours) {
+            if (!timeStr) return '';
+            const match = timeStr.match(/(\d{1,2}):(\d{2})/);
+            if (!match) return timeStr;
+            let h = parseInt(match[1]) - hours;
+            if (h < 0) h += 24;
+            return `${h}:${match[2]}`;
+        }
+
+        // ==================== 预览和导入 ====================
+        function showPreview() {
+            document.getElementById('previewCount').textContent = `共 ${previewData.length} 条`;
+            document.getElementById('previewTableBody').innerHTML = previewData.map(order => createTableRow(order)).join('');
+            document.getElementById('previewSection').classList.remove('hidden');
+            document.getElementById('importSection').classList.add('hidden');
+        }
+
+        function cancelPreview() {
+            document.getElementById('previewSection').classList.add('hidden');
+            document.getElementById('importSection').classList.remove('hidden');
+            document.getElementById('imagePreview').classList.add('hidden');
+            document.getElementById('ocrDebug').classList.add('hidden');
+            previewData = [];
+        }
+
+        function confirmImport() {
+            previewData.forEach(order => {
+                order.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                orders.push(order);
+            });
+            saveOrders();
+            renderOrderTable();
+            cancelPreview();
+            document.getElementById('orderTableSection').classList.remove('hidden');
+        }
+
+        // ==================== 表格渲染 ====================
+        // 格式化时间显示（确保HH:MM格式）
+        function formatTimeDisplay(value) {
+            if (!value) return '';
+            // 如果是小数格式（如0.652778），转换为HH:MM
+            const num = parseFloat(value);
+            if (!isNaN(num) && num > 0 && num < 1) {
+                const totalMins = Math.round(num * 24 * 60);
+                return `${Math.floor(totalMins / 60)}:${(totalMins % 60).toString().padStart(2, '0')}`;
+            }
+            // 如果是数字但不是小数（如14:30），直接返回
+            if (/^\d{1,2}:\d{2}$/.test(value)) return value;
+            return value;
+        }
+        
+        function createTableRow(order, showActions = false) {
+            const isYellow = order['接送站'] === '送站';
+            const cells = FIELDS.filter(f => f !== '车队金额' && f !== '旅行社金额').map(field => {
+                let value = order[field] || '';
+                // 对时间相关字段格式化
+                if (field === '班次时间' || field === '时间备注') {
+                    value = formatTimeDisplay(value);
+                }
+                const isRed = field === '时间' || field === '人数';
+                return `<td class="px-2 py-2 ${isRed ? 'text-red-custom font-medium' : ''} whitespace-nowrap">${value}</td>`;
+            }).join('');
+            const moneyCell = (order['金额'] || order['车队金额'] || order['旅行社金额']) ? 
+                `<td class="px-2 py-2 whitespace-nowrap">${order['金额'] || ''}</td>` : '';
+            const actions = showActions ? `<td class="px-2 py-2 text-center whitespace-nowrap">
+                <button onclick="editOrder('${order.id}')" class="text-primary hover:text-blue-700 mr-2"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="deleteOrder('${order.id}')" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>
+            </td>` : '';
+            return `<tr class="${isYellow ? 'row-yellow' : 'row-white'} border-b border-gray-100">${cells}${moneyCell}${actions}</tr>`;
+        }
+
+        function renderOrderTable() {
+            const tbody = document.getElementById('orderTableBody');
+            const emptyState = document.getElementById('emptyState');
+            const section = document.getElementById('orderTableSection');
+            if (orders.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                tbody.innerHTML = orders.map(order => createTableRow(order, true)).join('');
+            }
+            if (orders.length > 0) section.classList.remove('hidden');
+        }
+
+        // ==================== 订单操作 ====================
+        function addNewOrder() {
+            editingOrderId = null;
+            document.getElementById('modalTitle').textContent = '新增订单';
+            FIELDS.forEach(f => document.getElementById('edit_' + f).value = '');
+            document.getElementById('orderModal').classList.remove('hidden');
+        }
+
+        function editOrder(id) {
+            const order = orders.find(o => o.id === id);
+            if (!order) return;
+            editingOrderId = id;
+            document.getElementById('modalTitle').textContent = '编辑订单';
+            FIELDS.forEach(f => document.getElementById('edit_' + f).value = order[f] || '');
+            document.getElementById('orderModal').classList.remove('hidden');
+        }
+
+        function onJieSongChange() { autoFillTimeNote(); }
+
+        function autoFillTimeNote() {
+            const jiesong = document.getElementById('edit_接送站').value;
+            const changzhan = document.getElementById('edit_场站').value;
+            const bancitime = document.getElementById('edit_班次时间').value;
+            if (jiesong === '送站') {
+                document.getElementById('edit_时间备注').value = isAirport(changzhan) ? subtractHours(bancitime, 3) : subtractHours(bancitime, 2);
+            } else if (jiesong === '接站') {
+                document.getElementById('edit_时间备注').value = bancitime;
+            }
+        }
+
+        function saveOrder() {
+            const order = {};
+            FIELDS.forEach(f => order[f] = document.getElementById('edit_' + f).value.trim());
+            if (!order['班次时间']) { alert('请填写班次时间'); return; }
+            calculateTimeNote(order);
+            if (editingOrderId) {
+                const idx = orders.findIndex(o => o.id === editingOrderId);
+                if (idx >= 0) { order.id = editingOrderId; orders[idx] = order; }
+            } else {
+                order.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+                orders.push(order);
+            }
+            saveOrders();
+            renderOrderTable();
+            closeModal();
+        }
+
+        function deleteOrder(id) {
+            if (!confirm('确定要删除这条订单吗？')) return;
+            orders = orders.filter(o => o.id !== id);
+            saveOrders();
+            renderOrderTable();
+        }
+
+        function closeModal() { document.getElementById('orderModal').classList.add('hidden'); }
+
+        // ==================== 数据管理 ====================
+        function showHistory() { updateRecordCount(); document.getElementById('historyModal').classList.remove('hidden'); }
+        function closeHistoryModal() { document.getElementById('historyModal').classList.add('hidden'); }
+        function updateRecordCount() { document.getElementById('recordCount').textContent = orders.length; }
+        function clearAllData() {
+            if (!confirm('确定要清空所有数据吗？此操作不可恢复！')) return;
+            orders = [];
+            saveOrders();
+            renderOrderTable();
+            closeHistoryModal();
+        }
+        function saveOrders() { localStorage.setItem('orders', JSON.stringify(orders)); }
+
+        // ==================== 导出Excel ====================
+        // 导出字段顺序
+        const EXPORT_FIELDS = [
+            { key: '时间', title: '时间' },
+            { key: '团号', title: '团号' },
+            { key: '场站', title: '场站' },
+            { key: '接送站', title: '接送站' },
+            { key: '调度', title: '调度' },
+            { key: '司机', title: '司机' },
+            { key: '班次', title: '班次' },
+            { key: '班次时间', title: '班次时间' },
+            { key: '时间备注', title: '时间备注' },
+            { key: '客人', title: '客人' },
+            { key: '人数', title: '人数' },
+            { key: '宾馆', title: '宾馆' },
+            { key: '备注', title: '备注' },
+            { key: '金额', title: '金额' },
+            { key: '车队金额', title: '车队金额' },
+            { key: '旅行社金额', title: '旅行社金额' }
+        ];
+
+        function exportToExcel() {
+            if (orders.length === 0) { alert('暂无数据可导出'); return; }
+            
+            // 保留所有16列（不自动隐藏）
+            const visibleFields = EXPORT_FIELDS;
+            
+            // 构建表头
+            const header = visibleFields.map(f => f.title);
+            
+            // 构建数据行
+            const rows = orders.map(order => {
+                return visibleFields.map(f => {
+                    let value = order[f.key] || '';
+                    // 确保值为字符串
+                    if (value !== '' && value !== null && value !== undefined) {
+                        value = String(value);
+                    }
+                    return value;
+                });
+            });
+            
+            // 合并表头和数据
+            const exportData = [header, ...rows];
+            
+            // 创建工作表
+            const ws = XLSX.utils.aoa_to_sheet(exportData);
+            
+            // 设置列宽
+            const colWidths = visibleFields.map((f, i) => {
+                // 根据字段类型设置宽度
+                if (f.key === '时间') return { wch: 12 };
+                if (f.key === '班次时间' || f.key === '时间备注') return { wch: 10 };
+                if (f.key === '人数') return { wch: 6 };
+                if (f.key === '金额' || f.key === '车队金额' || f.key === '旅行社金额') return { wch: 12 };
+                if (f.key === '客人') return { wch: 25 };
+                if (f.key === '宾馆') return { wch: 30 };
+                return { wch: 12 };
+            });
+            ws['!cols'] = colWidths;
+            
+            // 创建工作簿
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '排单表');
+            
+            // 导出文件
+            const fileName = `排单表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+        }
+    </script>
+</body>
+</html>
