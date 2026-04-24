@@ -291,81 +291,46 @@
 
     <script>
         // ==================== 全局变量 ====================
-        // 百度OCR配置
-        const BAIDU_API_KEY = 'pOvi6fCPEWGP9Im6MFiSWwbx';
-        const BAIDU_SECRET_KEY = 'r2ky74DtONzTuW1ViPeR7cMMvFpQSiuD';
-        let baiduAccessToken = '';
-        let baiduTokenExpiry = 0;
+        // OCR.space 免费API (支持CORS)
+        const OCR_API_KEY = 'helloworld'; // 免费API key，5000次/小时限制
         
-        // 获取百度Access Token
-        async function getBaiduAccessToken() {
-            if (baiduAccessToken && Date.now() < baiduTokenExpiry) {
-                return baiduAccessToken;
-            }
-            
+        // OCR.space 文字识别
+        async function ocrSpaceOCR(imageBase64) {
             try {
-                logOCR('正在获取百度Access Token...');
-                const response = await fetch('https://aip.baidubce.com/oauth/2.0/token', {
+                logOCR('调用OCR.space云端识别...');
+                
+                const formData = new FormData();
+                formData.append('base64Image', imageBase64);
+                formData.append('language', 'chs'); // 简体中文
+                formData.append('isOverlayRequired', 'false');
+                formData.append('detectOrientation', 'true');
+                formData.append('scale', 'true');
+                formData.append('OCREngine', '2'); // 更强的引擎
+                
+                const response = await fetch('https://api.ocr.space/parse/image', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `grant_type=client_credentials&client_id=${BAIDU_API_KEY}&client_secret=${BAIDU_SECRET_KEY}`
+                    headers: { 'apikey': OCR_API_KEY },
+                    body: formData
                 });
                 
-                const data = await response.json();
-                logOCR('Token响应: ' + JSON.stringify(data).substring(0, 300));
-                
-                // 检查是否有错误
-                if (data.error) {
-                    logOCR('百度Token错误: ' + (data.error_description || data.error));
-                    return null;
-                }
-                
-                // 检查是否有access_token
-                if (data.access_token) {
-                    baiduAccessToken = data.access_token;
-                    baiduTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-                    logOCR('获取Token成功');
-                    return baiduAccessToken;
-                }
-                
-                logOCR('Token响应无access_token');
-            } catch (e) {
-                logOCR('获取百度Token异常: ' + e.message);
-                console.error('获取百度Token失败:', e);
-            }
-            return null;
-        }
-        
-        // 百度通用文字识别（高精度版）
-        async function baiduOCR(imageBase64) {
-            try {
-                const token = await getBaiduAccessToken();
-                if (!token) {
-                    throw new Error('无法获取百度Access Token');
-                }
-                
-                logOCR('调用百度OCR...');
-                
-                const response = await fetch(`https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=${token}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `image=${encodeURIComponent(imageBase64)}`
-                });
-                
-                if (!response.ok) throw new Error(`百度OCR失败: ${response.status}`);
+                if (!response.ok) throw new Error(`OCR API失败: ${response.status}`);
                 
                 const result = await response.json();
-                logOCR('百度OCR响应: ' + JSON.stringify(result).substring(0, 200));
+                logOCR('OCR响应: ' + JSON.stringify(result).substring(0, 300));
                 
-                if (result.words_result) {
-                    const text = result.words_result.map(r => r.words).join('\n');
+                if (result.ParsedResults && result.ParsedResults.length > 0) {
+                    const text = result.ParsedResults.map(r => r.ParsedText).join('\n');
                     logOCR('识别文本: ' + text.substring(0, 500));
                     return text;
                 }
                 
+                if (result.ErrorMessage) {
+                    throw new Error(result.ErrorMessage.join(', '));
+                }
+                
                 return '';
             } catch (e) {
-                logOCR('百度OCR错误: ' + e.message);
+                logOCR('OCR.space错误: ' + e.message);
                 throw e;
             }
         }
@@ -599,7 +564,7 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // ==================== 图片处理（百度OCR） ====================
+        // ==================== 图片处理（云端OCR） ====================
         function handleImageFile(file) {
             const reader = new FileReader();
             reader.onload = e => {
@@ -608,7 +573,7 @@
                 document.getElementById('ocrProgress').classList.remove('hidden');
                 document.getElementById('ocrDebug').classList.remove('hidden');
                 document.getElementById('ocrStatus').textContent = '正在识别...';
-                baiduOCRHandler(e.target.result);
+                ocrHandler(e.target.result);
             };
             reader.readAsDataURL(file);
         }
@@ -621,16 +586,16 @@
             }
         }
 
-        // 百度OCR主处理函数
-        async function baiduOCRHandler(imageBase64) {
+        // OCR主处理函数
+        async function ocrHandler(imageBase64) {
             try {
                 const base64Data = imageBase64.split(',')[1];
                 
-                // 尝试百度OCR
-                const text = await baiduOCR(base64Data);
+                // 使用OCR.space
+                const text = await ocrSpaceOCR(base64Data);
                 
                 if (text) {
-                    logOCR('百度OCR成功');
+                    logOCR('云端OCR成功');
                     
                     // 尝试多行表格解析
                     const parsedOrders = parseOCRTable(text);
@@ -653,10 +618,10 @@
                         }
                     }
                 } else {
-                    throw new Error('百度OCR未返回结果');
+                    throw new Error('云端OCR未返回结果');
                 }
             } catch (err) {
-                logOCR('OCR失败: ' + err.message);
+                logOCR('云端OCR失败: ' + err.message);
                 logOCR('尝试使用本地OCR...');
                 await useLocalOCR(imageBase64);
             } finally {
