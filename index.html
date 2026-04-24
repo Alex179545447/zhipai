@@ -7,7 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/paddleocr-js@1.0.6/dist/paddlejs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/paddlejs@1.0.1/dist/paddle.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -291,31 +292,46 @@
 
     <script>
         // ==================== 全局变量 ====================
-        // PaddleOCR.js 配置
+        // PaddleOCR配置
         let paddleOCRInstance = null;
+        let paddleOCRReady = false;
         
         // 初始化PaddleOCR
         async function initPaddleOCR() {
-            if (paddleOCRInstance) return paddleOCRInstance;
+            if (paddleOCRReady) return;
             try {
                 logOCR('初始化PaddleOCR...');
-                paddleOCRInstance = new PaddleJSOCRTiny({
-                    locateFile: file => `https://cdn.jsdelivr.net/npm/paddlejs-models@1.0.1/ocr/${file}`
-                });
-                await paddleOCRInstance.load();
+                const res = await fetch('https://cdn.jsdelivr.net/npm/paddlejs@1.0.1/package.json');
+                const pkg = await res.json();
+                logOCR('PaddleJS版本: ' + pkg.version);
+                
+                // 加载PaddleJS核心
+                if (typeof paddle === 'undefined') {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/paddlejs@1.0.1/dist/paddle.min.js';
+                    await new Promise((resolve, reject) => {
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
                 logOCR('PaddleOCR初始化成功');
-                return paddleOCRInstance;
+                paddleOCRReady = true;
             } catch (e) {
                 logOCR('PaddleOCR初始化失败: ' + e.message);
                 throw e;
             }
         }
         
-        // PaddleOCR文字识别
+        // PaddleOCR文字识别（使用Paddle.js内置OCR）
         async function paddleOCR(imageBase64) {
             try {
+                await initPaddleOCR();
                 logOCR('调用PaddleOCR识别...');
-                const ocr = await initPaddleOCR();
+                
+                if (typeof paddle === 'undefined') {
+                    throw new Error('Paddle未加载');
+                }
                 
                 // 创建图片元素
                 const img = new Image();
@@ -325,11 +341,12 @@
                     img.onerror = reject;
                 });
                 
-                const result = await ocr.recognize(img);
-                logOCR('PaddleOCR响应: ' + JSON.stringify(result).substring(0, 300));
+                // 使用Paddle.js OCR
+                const result = await paddle.ocr(img);
+                logOCR('PaddleOCR响应: ' + JSON.stringify(result).substring(0, 500));
                 
                 if (result && result.length > 0) {
-                    const text = result.map(item => item.transcription || '').join('\n');
+                    const text = result.map(item => item[1] || '').join('\n');
                     logOCR('识别文本: ' + text.substring(0, 500));
                     return text;
                 }
